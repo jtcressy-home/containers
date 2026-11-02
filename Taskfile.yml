@@ -1,0 +1,50 @@
+---
+version: "3"
+
+tasks:
+  default:
+    silent: true
+    cmds:
+      - task -l
+
+  apps:list:
+    desc: List image apps
+    silent: true
+    cmds:
+      - find apps -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort
+
+  apps:print:
+    desc: Print the Docker Bake plan for an app
+    requires:
+      vars:
+        - APP
+    dir: apps/{{.APP}}
+    cmds:
+      - docker buildx bake --print image-local
+
+  apps:build:
+    desc: Build an app locally with Docker Bake
+    requires:
+      vars:
+        - APP
+    dir: apps/{{.APP}}
+    cmds:
+      - docker buildx bake image-local
+
+  apps:smoke:
+    desc: Build an app and run its smoke check
+    requires:
+      vars:
+        - APP
+    cmds:
+      - task: apps:build
+        vars:
+          APP: "{{.APP}}"
+      - |
+        smoke_script="apps/{{.APP}}/smoke.sh"
+        image="{{.APP}}:local"
+        if [ -f "${smoke_script}" ]; then
+          bash "${smoke_script}" "${image}"
+        else
+          docker run --rm "${image}" --help
+        fi

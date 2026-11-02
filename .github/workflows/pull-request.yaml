@@ -1,0 +1,76 @@
+---
+name: Pull Request
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - apps/**
+      - .github/workflows/**
+      - .renovaterc.json5
+      - Taskfile.yml
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  changed:
+    name: Detect Changed Apps
+    runs-on: ubuntu-latest
+    outputs:
+      apps: ${{ steps.changed.outputs.apps }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Detect Changed Apps
+        id: changed
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          apps="$(git diff --name-only "${BASE_SHA}" "${HEAD_SHA}" \
+            | awk -F/ '/^apps\/[^/]+\// {print $2}' \
+            | sort -u)"
+          json="$(printf '%s\n' "${apps}" | jq -R -s -c 'split("\n") | map(select(length > 0))')"
+
+          echo "apps=${json}" >> "${GITHUB_OUTPUT}"
+          echo "${json}"
+
+  build:
+    if: ${{ needs.changed.outputs.apps != '[]' }}
+    name: Build ${{ matrix.app }}
+    needs:
+      - changed
+    uses: ./.github/workflows/app-builder.yaml
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJSON(needs.changed.outputs.apps) }}
+    with:
+      app: ${{ matrix.app }}
+      release: false
+
+  status:
+    if: ${{ !cancelled() }}
+    name: Build Status
+    needs:
+      - build
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Fail if any build failed
+        if: ${{ contains(needs.*.result, 'failure') }}
+        run: exit 1
+
+      - name: Pass
+        if: ${{ !contains(needs.*.result, 'failure') }}
+        run: echo "All changed app builds passed or were skipped"

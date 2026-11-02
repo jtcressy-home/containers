@@ -1,0 +1,96 @@
+---
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - apps/**
+      - .github/workflows/**
+      - .renovaterc.json5
+      - Taskfile.yml
+  workflow_dispatch:
+    inputs:
+      app:
+        description: App to release. Leave empty to release all apps.
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  changed:
+    name: Select Apps
+    runs-on: ubuntu-latest
+    outputs:
+      apps: ${{ steps.changed.outputs.apps }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Select Apps
+        id: changed
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          CURRENT_SHA: ${{ github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_APP: ${{ inputs.app }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${EVENT_NAME}" == "workflow_dispatch" && -n "${INPUT_APP}" ]]; then
+            apps="${INPUT_APP}"
+          elif [[ "${BEFORE_SHA}" =~ ^0+$ ]]; then
+            apps="$(find apps -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort)"
+          else
+            changed_files="$(git diff --name-only "${BEFORE_SHA}" "${CURRENT_SHA}")"
+            apps="$(printf '%s\n' "${changed_files}" \
+              | awk -F/ '/^apps\/[^/]+\// {print $2}' \
+              | sort -u)"
+
+            if [[ -z "${apps}" ]] && printf '%s\n' "${changed_files}" | grep -Eq '^(\.github/workflows/|\.renovaterc\.json5|Taskfile\.yml)'; then
+              apps="$(find apps -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort)"
+            fi
+          fi
+
+          json="$(printf '%s\n' "${apps:-}" | jq -R -s -c 'split("\n") | map(select(length > 0))')"
+
+          echo "apps=${json}" >> "${GITHUB_OUTPUT}"
+          echo "${json}"
+
+  build:
+    if: ${{ needs.changed.outputs.apps != '[]' }}
+    name: Release ${{ matrix.app }}
+    needs:
+      - changed
+    uses: ./.github/workflows/app-builder.yaml
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJSON(needs.changed.outputs.apps) }}
+    with:
+      app: ${{ matrix.app }}
+      release: true
+
+  status:
+    if: ${{ !cancelled() }}
+    name: Release Status
+    needs:
+      - build
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Fail if any release failed
+        if: ${{ contains(needs.*.result, 'failure') }}
+        run: exit 1
+
+      - name: Pass
+        if: ${{ !contains(needs.*.result, 'failure') }}
+        run: echo "All requested app releases passed or were skipped"

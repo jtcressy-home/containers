@@ -1,0 +1,130 @@
+---
+name: App Builder
+
+on:
+  workflow_call:
+    inputs:
+      app:
+        description: App directory under apps/
+        required: true
+        type: string
+      release:
+        description: Push the image to GHCR
+        required: true
+        type: boolean
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    name: Build ${{ inputs.app }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set Up QEMU
+        if: ${{ inputs.release }}
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set Up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Read App Metadata
+        id: app
+        env:
+          APP: ${{ inputs.app }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          app_dir="apps/${APP}"
+          bake_file="${app_dir}/docker-bake.hcl"
+          if [[ ! -f "${bake_file}" ]]; then
+            echo "Missing ${bake_file}" >&2
+            exit 1
+          fi
+
+          vars="$(docker buildx bake --file "${bake_file}" --list type=variables,format=json)"
+          version="$(jq -r '.[] | select(.name == "VERSION") | .value' <<< "${vars}")"
+          source="$(jq -r '.[] | select(.name == "SOURCE") | .value' <<< "${vars}")"
+          upstream_ref="$(jq -r '.[] | select(.name == "UPSTREAM_REF") | .value' <<< "${vars}")"
+          upstream_short="${upstream_ref:0:12}"
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+
+          if [[ -z "${version}" || "${version}" == "null" ]]; then
+            echo "VERSION is required in ${bake_file}" >&2
+            exit 1
+          fi
+
+          echo "image=ghcr.io/${owner}/${APP}" >> "${GITHUB_OUTPUT}"
+          echo "source=${source}" >> "${GITHUB_OUTPUT}"
+          echo "upstream-ref=${upstream_ref}" >> "${GITHUB_OUTPUT}"
+          echo "upstream-short=${upstream_short}" >> "${GITHUB_OUTPUT}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Login to GitHub Container Registry
+        if: ${{ inputs.release }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build Image Metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          flavor: latest=false
+          images: ${{ steps.app.outputs.image }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.url=${{ steps.app.outputs.image }}
+            org.opencontainers.image.version=${{ steps.app.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.vendor=${{ github.repository_owner }}
+            org.opencontainers.image.documentation=${{ steps.app.outputs.source }}
+          tags: |
+            type=raw,value=rolling,enable=${{ inputs.release }}
+            type=raw,value=${{ steps.app.outputs.version }},enable=${{ inputs.release }}
+            type=raw,value=upstream-${{ steps.app.outputs.upstream-short }},enable=${{ inputs.release }}
+            type=sha,prefix=sha-,enable=${{ inputs.release }}
+            type=raw,value=sandbox,enable=${{ ! inputs.release }}
+
+      - name: Build
+        uses: docker/bake-action@v6
+        with:
+          files: |
+            ./apps/${{ inputs.app }}/docker-bake.hcl
+            cwd://${{ steps.meta.outputs.bake-file }}
+          set: |
+            *.context=./apps/${{ inputs.app }}
+          targets: ${{ inputs.release && 'image-all' || 'image-local' }}
+          push: ${{ inputs.release }}
+          load: ${{ ! inputs.release }}
+          provenance: ${{ inputs.release }}
+          sbom: ${{ inputs.release }}
+
+      - name: Smoke Test
+        if: ${{ ! inputs.release }}
+        env:
+          APP: ${{ inputs.app }}
+          IMAGE: ${{ steps.app.outputs.image }}:sandbox
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if ! docker image inspect "${IMAGE}" >/dev/null 2>&1; then
+            IMAGE="${APP}:local"
+          fi
+
+          smoke_script="./apps/${APP}/smoke.sh"
+          if [[ -f "${smoke_script}" ]]; then
+            bash "${smoke_script}" "${IMAGE}"
+          else
+            docker run --rm "${IMAGE}" --help
+          fi
