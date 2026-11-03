@@ -1,0 +1,68 @@
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+  extends: [
+    "config:recommended",
+    ":dependencyDashboard",
+    ":semanticCommits",
+  ],
+  prHourlyLimit: 0,
+  customManagers: [
+    {
+      customType: "regex",
+      description: "Process version annotations in Docker Bake files",
+      managerFilePatterns: ["/(^|/)docker-bake\\.hcl$/"],
+      matchStrings: [
+        // Values containing @ are image digest pins and belong to the manager below.
+        'datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)( versioning=(?<versioning>\\S+))?\\n\\s*default = "(?<currentValue>[^"@]+)"',
+      ],
+      datasourceTemplate: "{{#if datasource}}{{{datasource}}}{{else}}github-releases{{/if}}",
+      versioningTemplate: "{{#if versioning}}{{{versioning}}}{{else}}semver{{/if}}",
+    },
+    {
+      customType: "regex",
+      description: "Track Git branch HEAD digests in Docker Bake files",
+      managerFilePatterns: ["/(^|/)docker-bake\\.hcl$/"],
+      matchStrings: [
+        'datasource=git-refs packageName=(?<packageName>\\S+) depName=(?<depName>\\S+) currentValue=(?<currentValue>\\S+)\\n\\s*default = "(?<currentDigest>[a-f0-9]{7,40})"',
+      ],
+      currentValueTemplate: "{{{currentValue}}}",
+      datasourceTemplate: "git-refs",
+    },
+    {
+      customType: "regex",
+      description: "Track pinned image digests in Docker Bake files",
+      managerFilePatterns: ["/(^|/)docker-bake\\.hcl$/"],
+      matchStrings: [
+        'datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\n\\s*default = "(?:[^"]+:)?(?<currentValue>[^"@]+)@(?<currentDigest>sha256:[a-f0-9]+)"',
+      ],
+      datasourceTemplate: "{{{datasource}}}",
+      versioningTemplate: "docker",
+    },
+  ],
+  packageRules: [
+    {
+      description: ["Container app update commits"],
+      addLabels: ["app/{{parentDir}}"],
+      additionalBranchPrefix: "{{parentDir}}-",
+      commitMessageTopic: "{{depName}}",
+      semanticCommitScope: "{{parentDir}}",
+      semanticCommitType: "release",
+      matchFileNames: ["apps/**/docker-bake.hcl", "apps/**/Dockerfile"],
+    },
+    {
+      description: ["Auto-merge app source bumps after checks pass"],
+      automerge: true,
+      automergeType: "pr",
+      ignoreTests: false,
+      matchFileNames: ["apps/**/docker-bake.hcl"],
+    },
+    // Later rules win. This keeps skylight-mcp off the automerge rule above.
+    // Base-image digest bumps in docker-bake.hcl are tracked and still wait
+    // for review. UPSTREAM_REF has no Renovate annotation, so it is not bumped.
+    {
+      description: ["Keep skylight-mcp updates manual"],
+      automerge: false,
+      matchFileNames: ["apps/skylight-mcp/**"],
+    },
+  ],
+}

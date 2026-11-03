@@ -1,0 +1,110 @@
+---
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - apps/**
+      - .github/workflows/**
+      - .renovaterc.json5
+      - Taskfile.yml
+  workflow_dispatch:
+    inputs:
+      app:
+        description: App to release. Leave empty to release all apps.
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  changed:
+    name: Select Apps
+    runs-on: ubuntu-latest
+    outputs:
+      apps: ${{ steps.changed.outputs.apps }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Select Apps
+        id: changed
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          CURRENT_SHA: ${{ github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_APP: ${{ inputs.app }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${EVENT_NAME}" == "workflow_dispatch" ]]; then
+            if [[ -n "${INPUT_APP}" ]]; then
+              if [[ ! "${INPUT_APP}" =~ ^[a-z0-9-]+$ ]]; then
+                echo "App name must match [a-z0-9-]+: ${INPUT_APP}" >&2
+                exit 1
+              fi
+              if [[ ! -d "apps/${INPUT_APP}" ]]; then
+                echo "No app directory apps/${INPUT_APP}" >&2
+                exit 1
+              fi
+              apps="${INPUT_APP}"
+            else
+              apps="$(find apps -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort)"
+            fi
+          elif [[ "${BEFORE_SHA}" =~ ^0+$ ]]; then
+            apps="$(find apps -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort)"
+          else
+            changed_files="$(git diff --name-only "${BEFORE_SHA}" "${CURRENT_SHA}")"
+            apps="$(printf '%s\n' "${changed_files}" \
+              | awk -F/ '/^apps\/[^/]+\// {print $2}' \
+              | sort -u)"
+
+            if [[ -z "${apps}" ]] && printf '%s\n' "${changed_files}" | grep -Eq '^(\.github/workflows/|\.renovaterc\.json5|Taskfile\.yml)'; then
+              apps="$(find apps -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort)"
+            fi
+          fi
+
+          json="$(printf '%s\n' "${apps:-}" | jq -R -s -c 'split("\n") | map(select(length > 0))')"
+
+          echo "apps=${json}" >> "${GITHUB_OUTPUT}"
+          echo "${json}"
+
+  build:
+    if: ${{ needs.changed.outputs.apps != '[]' && github.ref == 'refs/heads/main' }}
+    name: Release ${{ matrix.app }}
+    needs:
+      - changed
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/app-builder.yaml
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJSON(needs.changed.outputs.apps) }}
+    with:
+      app: ${{ matrix.app }}
+      release: true
+
+  status:
+    if: ${{ !cancelled() }}
+    name: Release Status
+    needs:
+      - build
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Fail if any release failed
+        if: ${{ contains(needs.*.result, 'failure') }}
+        run: exit 1
+
+      - name: Pass
+        if: ${{ !contains(needs.*.result, 'failure') }}
+        run: echo "All requested app releases passed or were skipped"
