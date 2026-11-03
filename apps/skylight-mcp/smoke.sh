@@ -28,23 +28,30 @@ cleanup() {
 }
 trap cleanup EXIT
 
-node_version="$(docker run --rm --entrypoint node "${image}" --version | tr -d '\r')"
+# Match the image arch so an arm64 load on an amd64 runner uses qemu instead of
+# printing a platform warning into the command output.
+platform="$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "${image}")"
+image_run() {
+    docker run --platform "${platform}" "$@"
+}
+
+node_version="$(image_run --rm --entrypoint node "${image}" --version | tr -d '\r')"
 [[ "${node_version}" == "v26.13.0" ]] || fail "node version ${node_version}, want v26.13.0"
 echo "smoke: node ${node_version}"
 
-proxy_version="$(docker run --rm --entrypoint mcp-proxy "${image}" --version | tr -d '\r')"
+proxy_version="$(image_run --rm --entrypoint mcp-proxy "${image}" --version | tr -d '\r')"
 [[ "${proxy_version}" == "mcp-proxy 0.13.3" ]] || fail "mcp-proxy version ${proxy_version}, want mcp-proxy 0.13.3"
 echo "smoke: ${proxy_version}"
 
-uid="$(docker run --rm --entrypoint id "${image}" -u | tr -d '\r')"
+uid="$(image_run --rm --entrypoint id "${image}" -u | tr -d '\r')"
 [[ "${uid}" == "10001" ]] || fail "uid ${uid}, want 10001"
 echo "smoke: uid ${uid}"
 
-wget_banner="$(docker run --rm --entrypoint wget "${image}" --help 2>&1 | head -n 1 || true)"
+wget_banner="$(image_run --rm --entrypoint wget "${image}" --help 2>&1 | awk '/^WARNING:/{next} {print; exit}' || true)"
 [[ "${wget_banner}" == BusyBox* ]] || fail "wget is not BusyBox: ${wget_banner}"
 echo "smoke: ${wget_banner}"
 
-docker run --rm --entrypoint /bin/sh "${image}" -c \
+image_run --rm --entrypoint /bin/sh "${image}" -c \
     'test -f /opt/skylight-mcp/dist/index.js && grep -q "\"version\": \"18.0.8\"" /opt/skylight-mcp/node_modules/dotenv/package.json'
 echo "smoke: dist/index.js and dotenv 18.0.8 are present"
 
@@ -56,7 +63,7 @@ docker network create \
     --opt com.docker.network.bridge.enable_ip_masquerade=false \
     "${network}" >/dev/null
 
-cid="$(docker run -d \
+cid="$(image_run -d \
     --network "${network}" \
     -p "127.0.0.1:${port}:${port}" \
     "${image}" \
