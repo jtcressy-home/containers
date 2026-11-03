@@ -44,9 +44,9 @@ The `docker-bake.hcl` file is the image contract. It defines:
 
 Renovate reads inline annotations in `docker-bake.hcl`. For upstreams without
 tags or releases, use Renovate's `git-refs` datasource to pin and update a
-branch HEAD commit. `apps/skylight-mcp` is the exception: its upstream ref is
-not annotated, and `.renovaterc.json5` sets `automerge: false` for that app.
-See `apps/skylight-mcp/README.md`.
+branch HEAD commit. `apps/skylight-mcp` does not annotate `UPSTREAM_REF`.
+Its base-image digests are annotated, and `.renovaterc.json5` sets
+`automerge: false` for that app. See `apps/skylight-mcp/README.md`.
 
 ## Local Builds
 
@@ -58,14 +58,14 @@ task apps:smoke APP=skylight-mcp
 
 ## Releases
 
-Pull requests that change `apps/**` build each changed app for the runner
-architecture, load the image locally, and run `smoke.sh`. That workflow does
+Pull requests that change `apps/**` build each changed app for `linux/amd64`
+and `linux/arm64`, load both images, and run `smoke.sh`. That workflow does
 not log in to GHCR and does not push.
 
 The release workflow publishes on a push to `main` that changes an app (or the
-shared workflow, Renovate, or Taskfile inputs), and when Release is started
-with `workflow_dispatch`. It builds `linux/amd64` and `linux/arm64` and pushes
-provenance and SBOM attestations the same way `jtcressy/containers` does.
+shared workflow, Renovate, or Taskfile inputs). `workflow_dispatch` publishes
+only when it is run on `main`. It builds `linux/amd64` and `linux/arm64` and
+pushes provenance and SBOM attestations the same way `jtcressy/containers` does.
 
 Published tags include:
 
@@ -74,6 +74,7 @@ Published tags include:
 - `upstream-<short upstream sha>`
 - `sha-<repository commit>`
 
-The index digest is in the release run's Build step, in the bake-action
-`Metadata` log group (`image-all` → `containerimage.digest`). Pin that digest
-in downstream manifests. Do not pin `rolling`.
+The release job writes the index digest to the job summary as
+`<image>:<version>@sha256:…`. The same value is in the Build step's Metadata
+log (`image-all` → `containerimage.digest`). Pin that digest in downstream
+manifests. Do not pin `rolling`.

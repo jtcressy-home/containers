@@ -20,10 +20,12 @@ variable "SOURCE" {
 }
 
 variable "NODE_IMAGE" {
+  // renovate: datasource=docker depName=node
   default = "node:26.13.0-alpine@sha256:c6ad9e9c1d80f6eb607c26b4b0a132ff7a2344fad1c78ea3baa2a7d4c8de6d94"
 }
 
 variable "PROXY_IMAGE" {
+  // renovate: datasource=docker depName=ghcr.io/sparfenyuk/mcp-proxy
   default = "ghcr.io/sparfenyuk/mcp-proxy:v0.13.3@sha256:93fd47638ea9b5b017cf826f2c7ea4f3ce9d15e7984970de25a9b0aebef66189"
 }
 

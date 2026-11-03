@@ -24,8 +24,8 @@ ghcr.io/jtcressy-home/skylight-mcp:1.4.7@sha256:<index digest>
 | --- | --- |
 | `VERSION` | `1.4.7` |
 | `UPSTREAM_REF` | `5f22579d18a09cc4120401aca1f5f4deb5fe3915` |
-| Node | `node:26.13.0-alpine@sha256:c6ad9e9c1d80f6eb607c26b4b0a132ff7a2344fad1c78ea3baa2a7d4c8de6d94` |
-| Bridge | `ghcr.io/sparfenyuk/mcp-proxy:v0.13.3@sha256:93fd47638ea9b5b017cf826f2c7ea4f3ce9d15e7984970de25a9b0aebef66189` |
+| Node | `NODE_IMAGE` in `docker-bake.hcl` |
+| Bridge | `PROXY_IMAGE` in `docker-bake.hcl` |
 
 Both bases are Alpine 3.24.3. The build fetches that exact commit, runs
 `npm ci` and `npm run build`, then installs production dependencies only.
@@ -57,12 +57,15 @@ to the `rolling` tag without a review of the Skylight code.
 not open a pull request to move it. Bumping past v1.4.7 is a manual pull
 request, the same way `5f22579` was reviewed.
 
+`NODE_IMAGE` and `PROXY_IMAGE` are the only copies of the base-image pins.
+Renovate's digest manager reads those two `docker-bake.hcl` lines. The
+Dockerfile args have no defaults, so a build takes the values from bake.
+
 A later package rule sets `automerge: false` for `apps/skylight-mcp/**`.
 Renovate applies rules in order, so this overrides the repo-wide automerge
-for this app. If base-image digests are ever tracked, those updates still
-open pull requests and still wait for a person to merge them. Do not remove
-that rule, and do not add a datasource annotation on `UPSTREAM_REF`, unless
-this policy changes on purpose.
+for this app. Base-image digest bumps open pull requests and wait for a
+person to merge them. Do not remove that rule, and do not add a datasource
+annotation on `UPSTREAM_REF`, unless this policy changes on purpose.
 
 ## Runtime
 

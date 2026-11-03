@@ -67,7 +67,7 @@ if docker inspect "${cid}" --format '{{range .Config.Env}}{{println .}}{{end}}' 
 fi
 
 code=""
-for _ in $(seq 1 30); do
+for _ in $(seq 1 90); do
     if ! docker inspect -f '{{.State.Running}}' "${cid}" | grep -qx true; then
         fail "container exited before /healthz returned 204"
     fi
@@ -93,7 +93,7 @@ mcp_post() {
         -D "${hdr}"
         -o "${body}"
         -w '%{http_code}'
-        --max-time 30
+        --max-time 60
         -H 'Content-Type: application/json'
         -H 'Accept: application/json, text/event-stream'
     )

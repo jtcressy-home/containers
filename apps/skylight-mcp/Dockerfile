@@ -1,10 +1,11 @@
 # syntax=docker/dockerfile:1
+# check=skip=InvalidDefaultArgInFrom
 
 # Both bases are Alpine 3.24.3. The musl node binary from NODE_IMAGE is copied
 # into PROXY_IMAGE so the runtime does not apt/apk-install an unpinned node.
-# Keep these defaults identical to apps/skylight-mcp/docker-bake.hcl.
-ARG NODE_IMAGE=node:26.13.0-alpine@sha256:c6ad9e9c1d80f6eb607c26b4b0a132ff7a2344fad1c78ea3baa2a7d4c8de6d94
-ARG PROXY_IMAGE=ghcr.io/sparfenyuk/mcp-proxy:v0.13.3@sha256:93fd47638ea9b5b017cf826f2c7ea4f3ce9d15e7984970de25a9b0aebef66189
+# The references are build-args from docker-bake.hcl, which is the only pin.
+ARG NODE_IMAGE
+ARG PROXY_IMAGE
 
 FROM ${NODE_IMAGE} AS build
 

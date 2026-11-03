@@ -14,7 +14,8 @@
       description: "Process version annotations in Docker Bake files",
       managerFilePatterns: ["/(^|/)docker-bake\\.hcl$/"],
       matchStrings: [
-        'datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)( versioning=(?<versioning>\\S+))?\\n\\s*default = "(?<currentValue>[^"]+)"',
+        // Values containing @ are image digest pins and belong to the manager below.
+        'datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)( versioning=(?<versioning>\\S+))?\\n\\s*default = "(?<currentValue>[^"@]+)"',
       ],
       datasourceTemplate: "{{#if datasource}}{{{datasource}}}{{else}}github-releases{{/if}}",
       versioningTemplate: "{{#if versioning}}{{{versioning}}}{{else}}semver{{/if}}",
@@ -28,6 +29,16 @@
       ],
       currentValueTemplate: "{{{currentValue}}}",
       datasourceTemplate: "git-refs",
+    },
+    {
+      customType: "regex",
+      description: "Track pinned image digests in Docker Bake files",
+      managerFilePatterns: ["/(^|/)docker-bake\\.hcl$/"],
+      matchStrings: [
+        'datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\n\\s*default = "(?:[^"]+:)?(?<currentValue>[^"@]+)@(?<currentDigest>sha256:[a-f0-9]+)"',
+      ],
+      datasourceTemplate: "{{{datasource}}}",
+      versioningTemplate: "docker",
     },
   ],
   packageRules: [
@@ -47,9 +58,9 @@
       ignoreTests: false,
       matchFileNames: ["apps/**/docker-bake.hcl"],
     },
-    // Later rules win. This keeps skylight-mcp off the automerge rule above,
-    // including any future base-image digest updates under the app directory.
-    // UPSTREAM_REF itself has no Renovate annotation, so it is not bumped at all.
+    // Later rules win. This keeps skylight-mcp off the automerge rule above.
+    // Base-image digest bumps in docker-bake.hcl are tracked and still wait
+    // for review. UPSTREAM_REF has no Renovate annotation, so it is not bumped.
     {
       description: ["Keep skylight-mcp updates manual"],
       automerge: false,

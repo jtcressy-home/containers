@@ -19,7 +19,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
   changed:
@@ -29,7 +28,7 @@ jobs:
       apps: ${{ steps.changed.outputs.apps }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -45,8 +44,20 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ "${EVENT_NAME}" == "workflow_dispatch" && -n "${INPUT_APP}" ]]; then
-            apps="${INPUT_APP}"
+          if [[ "${EVENT_NAME}" == "workflow_dispatch" ]]; then
+            if [[ -n "${INPUT_APP}" ]]; then
+              if [[ ! "${INPUT_APP}" =~ ^[a-z0-9-]+$ ]]; then
+                echo "App name must match [a-z0-9-]+: ${INPUT_APP}" >&2
+                exit 1
+              fi
+              if [[ ! -d "apps/${INPUT_APP}" ]]; then
+                echo "No app directory apps/${INPUT_APP}" >&2
+                exit 1
+              fi
+              apps="${INPUT_APP}"
+            else
+              apps="$(find apps -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort)"
+            fi
           elif [[ "${BEFORE_SHA}" =~ ^0+$ ]]; then
             apps="$(find apps -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort)"
           else
@@ -66,10 +77,13 @@ jobs:
           echo "${json}"
 
   build:
-    if: ${{ needs.changed.outputs.apps != '[]' }}
+    if: ${{ needs.changed.outputs.apps != '[]' && github.ref == 'refs/heads/main' }}
     name: Release ${{ matrix.app }}
     needs:
       - changed
+    permissions:
+      contents: read
+      packages: write
     uses: ./.github/workflows/app-builder.yaml
     strategy:
       fail-fast: false
