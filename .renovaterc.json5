@@ -5,8 +5,6 @@
     ":dependencyDashboard",
     ":semanticCommits",
   ],
-  onboarding: false,
-  requireConfig: "optional",
   prHourlyLimit: 0,
   customManagers: [
     {
